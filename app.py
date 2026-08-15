@@ -1,14 +1,11 @@
 import streamlit as st
 from openai import OpenAI
-import os
-from pypdf import PdfReader
-import io
 import pymysql
 import bcrypt
-import datetime
+from pypdf import PdfReader
+import io
 
 # ---------- 数据库连接函数（使用 st.secrets） ----------
-
 def get_db_connection():
     return pymysql.connect(
         host=st.secrets["connections.mysql"]["host"],
@@ -44,62 +41,18 @@ def call_ai(system_prompt, user_message):
 # ---------- 页面配置 ----------
 st.set_page_config(page_title="数智伴学 · 教育助教", page_icon="🧑‍🏫")
 
-# ---------- 自定义CSS ----------
+# ---------- 自定义CSS（不变） ----------
 st.markdown("""
 <style>
     .stApp { background: linear-gradient(145deg, #f6f9fc 0%, #e6f0f5 100%); }
-    .main-title {
-        text-align: center;
-        padding: 0.8rem 1rem;
-        background: rgba(255,255,255,0.7);
-        backdrop-filter: blur(6px);
-        border-radius: 30px;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 6px 20px rgba(0,0,0,0.05);
-        border: 1px solid rgba(255,255,255,0.6);
-    }
+    .main-title { text-align: center; padding: 0.8rem 1rem; background: rgba(255,255,255,0.7); backdrop-filter: blur(6px); border-radius: 30px; margin-bottom: 1.5rem; box-shadow: 0 6px 20px rgba(0,0,0,0.05); border: 1px solid rgba(255,255,255,0.6); }
     .main-title h1 { color: #1e3c5c; font-weight: 700; }
     .main-title p { color: #3a6a8a; font-size: 0.95rem; }
-    .custom-card {
-        background: rgba(255,255,255,0.85);
-        backdrop-filter: blur(10px);
-        border-radius: 28px;
-        padding: 1.8rem;
-        box-shadow: 0 12px 40px rgba(0,0,0,0.08);
-        border: 1px solid rgba(255,255,255,0.4);
-        margin-bottom: 1.5rem;
-    }
-    .stButton>button {
-        border-radius: 40px !important;
-        background: linear-gradient(135deg, #4f8bc9 0%, #2b5b8c 100%) !important;
-        color: white !important;
-        font-weight: 600 !important;
-        border: none !important;
-        padding: 0.6rem 2rem !important;
-        box-shadow: 0 4px 14px rgba(47, 128, 237, 0.3) !important;
-        transition: 0.3s !important;
-    }
+    .custom-card { background: rgba(255,255,255,0.85); backdrop-filter: blur(10px); border-radius: 28px; padding: 1.8rem; box-shadow: 0 12px 40px rgba(0,0,0,0.08); border: 1px solid rgba(255,255,255,0.4); margin-bottom: 1.5rem; }
+    .stButton>button { border-radius: 40px !important; background: linear-gradient(135deg, #4f8bc9 0%, #2b5b8c 100%) !important; color: white !important; font-weight: 600 !important; border: none !important; padding: 0.6rem 2rem !important; box-shadow: 0 4px 14px rgba(47, 128, 237, 0.3) !important; transition: 0.3s !important; }
     .stButton>button:hover { transform: scale(1.02) !important; }
-    .user-bubble {
-        background: #4f8bc9;
-        color: white;
-        border-radius: 22px 22px 6px 22px;
-        padding: 12px 20px;
-        margin: 8px 0;
-        display: inline-block;
-        max-width: 80%;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-    }
-    .assistant-bubble {
-        background: white;
-        color: #1e293b;
-        border-radius: 22px 22px 22px 6px;
-        padding: 12px 20px;
-        margin: 8px 0;
-        display: inline-block;
-        max-width: 80%;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.04);
-    }
+    .user-bubble { background: #4f8bc9; color: white; border-radius: 22px 22px 6px 22px; padding: 12px 20px; margin: 8px 0; display: inline-block; max-width: 80%; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    .assistant-bubble { background: white; color: #1e293b; border-radius: 22px 22px 22px 6px; padding: 12px 20px; margin: 8px 0; display: inline-block; max-width: 80%; box-shadow: 0 2px 10px rgba(0,0,0,0.04); }
     .stFileUploader { border: 2px dashed #4f8bc9 !important; border-radius: 28px !important; background: rgba(255,255,255,0.5) !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -216,7 +169,6 @@ def get_all_courseware():
 
 # ---------- 主界面 ----------
 if not st.session_state.logged_in:
-    # ---------- 登录/注册界面 ----------
     st.markdown('<div class="main-title"><h1>🧑‍🏫 数智伴学 · 教育助教</h1><p>请登录或注册</p></div>', unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["登录", "注册"])
     with tab1:
@@ -253,8 +205,6 @@ if not st.session_state.logged_in:
                     else:
                         st.error(msg)
 else:
-    # ---------- 已登录主界面 ----------
-    # 右上角退出按钮
     col1, col2, col3 = st.columns([5, 1, 1])
     with col1:
         st.markdown(f'<div style="font-size:1.2rem; font-weight:600;">👋 欢迎，{st.session_state.username} ({ {"student":"学生", "parent":"家长", "teacher":"教师"}[st.session_state.role] })</div>', unsafe_allow_html=True)
@@ -266,16 +216,12 @@ else:
             st.session_state.role = None
             st.rerun()
 
-    # 标题
     st.markdown('<div class="main-title"><h1>🧑‍🏫 数智伴学 · 教育助教</h1><p style="font-size:0.8rem; color:#5a7a8a;">✨ 本作品由 XX 团队原创开发，部分内容由 AI 辅助生成</p></div>', unsafe_allow_html=True)
 
-    # ---------- 根据角色显示功能模块 ----------
     if st.session_state.role == 'student':
-        # 学生：只显示答疑助手 + 课件预览（无上传）
         st.markdown('<div class="custom-card">', unsafe_allow_html=True)
         st.subheader("📚 个性化学习辅导")
         st.caption("🤖 我是你的学习助手，可以帮你解答课程疑问、提供学习建议。")
-        # 显示最近3条聊天记录
         recent = get_recent_chat(st.session_state.user_id, 3)
         for msg in recent:
             if msg['role'] == 'user':
@@ -293,7 +239,6 @@ else:
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # 学生预览课件（只读）
         st.markdown("---")
         st.markdown('<div class="custom-card">', unsafe_allow_html=True)
         st.subheader("📁 课件预览")
@@ -317,7 +262,6 @@ else:
         st.markdown('</div>', unsafe_allow_html=True)
 
     elif st.session_state.role == 'parent':
-        # 家长：只显示心理疏导（无课件）
         st.markdown('<div class="custom-card">', unsafe_allow_html=True)
         st.subheader("❤️ 心理疏导与亲子沟通")
         st.caption("🤖 我是家庭教育助手，可以帮你分析孩子心理状态，提供沟通建议。")
@@ -339,7 +283,6 @@ else:
         st.markdown('</div>', unsafe_allow_html=True)
 
     else:  # teacher
-        # 教师：显示教研辅助 + 课件上传
         st.markdown('<div class="custom-card">', unsafe_allow_html=True)
         st.subheader("📝 AI 教研辅助")
         st.caption("🤖 我是教学助手，可以帮助你生成教案、设计习题、提供教学建议。")
@@ -361,7 +304,6 @@ else:
                 st.warning("请输入主题或具体要求")
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # 课件上传（教师专属）
         st.markdown("---")
         st.markdown('<div class="custom-card">', unsafe_allow_html=True)
         st.subheader("📤 上传课件（供学生预览）")
