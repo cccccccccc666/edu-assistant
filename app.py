@@ -5,14 +5,14 @@ import bcrypt
 from pypdf import PdfReader
 import io
 
-# ---------- 数据库连接函数（使用 st.secrets） ----------
+# ---------- 数据库连接函数（使用扁平 st.secrets） ----------
 def get_db_connection():
     return pymysql.connect(
-        host=st.secrets["connections.mysql"]["host"],
-        port=int(st.secrets["connections.mysql"]["port"]),
-        user=st.secrets["connections.mysql"]["username"],
-        password=st.secrets["connections.mysql"]["password"],
-        database=st.secrets["connections.mysql"]["database"],
+        host=st.secrets["DB_HOST"],
+        port=int(st.secrets["DB_PORT"]),
+        user=st.secrets["DB_USER"],
+        password=st.secrets["DB_PASSWORD"],
+        database=st.secrets["DB_NAME"],
         charset='utf8mb4',
         cursorclass=pymysql.cursors.DictCursor
     )
@@ -41,7 +41,7 @@ def call_ai(system_prompt, user_message):
 # ---------- 页面配置 ----------
 st.set_page_config(page_title="数智伴学 · 教育助教", page_icon="🧑‍🏫")
 
-# ---------- 自定义CSS（不变） ----------
+# ---------- 自定义CSS ----------
 st.markdown("""
 <style>
     .stApp { background: linear-gradient(145deg, #f6f9fc 0%, #e6f0f5 100%); }
