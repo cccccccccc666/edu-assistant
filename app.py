@@ -179,7 +179,7 @@ def upload_courseware(teacher_id, file_name, file_type, file_data):
     # 限制扩展名长度（如果无扩展名则使用 'bin'）
     if ext == file_name:  # 无扩展名
         ext = 'bin'
-    
+
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
@@ -299,7 +299,7 @@ else:
             st.query_params.clear()
             st.rerun()
 
-    st.markdown('<div class="main-title"><h1>🧑‍🏫 数智伴学 · 教育助教</h1><p style="font-size:0.8rem; color:#5a7a8a;"> </p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-title"><h1>🧸 数智伴学 · 碎碎念小助教</h1><p style="font-size:0.8rem; color:#5a7a8a;"> </p></div>', unsafe_allow_html=True)
 
     if st.session_state.role == 'student':
         st.markdown('<div class="custom-card">', unsafe_allow_html=True)
