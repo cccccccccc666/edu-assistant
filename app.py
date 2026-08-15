@@ -154,6 +154,42 @@ def upload_courseware(teacher_id, file_name, file_type, file_data):
     finally:
         conn.close()
 
+# ---------- 辅助函数：获取指定教师的所有课件 ----------
+def get_teacher_courseware(teacher_id):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, file_name, upload_time FROM courseware WHERE teacher_id = %s ORDER BY upload_time DESC",
+                (teacher_id,)
+            )
+            return cur.fetchall()
+    except Exception as e:
+        st.error(f"读取教师课件失败：{e}")
+        return []
+    finally:
+        conn.close()
+
+# ---------- 辅助函数：删除课件（仅限本人） ----------
+def delete_courseware(courseware_id, teacher_id):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            # 先验证该课件是否属于该教师
+            cur.execute(
+                "SELECT id FROM courseware WHERE id = %s AND teacher_id = %s",
+                (courseware_id, teacher_id)
+            )
+            if not cur.fetchone():
+                return False, "课件不存在或无权删除"
+            cur.execute("DELETE FROM courseware WHERE id = %s", (courseware_id,))
+            conn.commit()
+            return True, "删除成功"
+    except Exception as e:
+        return False, f"删除失败：{str(e)}"
+    finally:
+        conn.close()
+
 # ---------- 辅助函数：获取所有课件（学生预览） ----------
 def get_all_courseware():
     conn = get_db_connection()
@@ -305,6 +341,7 @@ else:
         st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown("---")
+        # 课件上传区域
         st.markdown('<div class="custom-card">', unsafe_allow_html=True)
         st.subheader("📤 上传课件（供学生预览）")
         uploaded_file = st.file_uploader("选择文件（支持 TXT / PDF）", type=["txt", "pdf"])
@@ -319,6 +356,28 @@ else:
                 )
                 if success:
                     st.success("课件上传成功！")
+                    st.rerun()
                 else:
                     st.error("上传失败")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # 显示该教师已上传的课件，并提供删除按钮
+        st.markdown('<div class="custom-card">', unsafe_allow_html=True)
+        st.subheader("📋 我上传的课件")
+        teacher_cw = get_teacher_courseware(st.session_state.user_id)
+        if teacher_cw:
+            for cw in teacher_cw:
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    st.write(f"📄 {cw['file_name']} (上传于 {cw['upload_time']})")
+                with col2:
+                    if st.button("❌ 删除", key=f"del_{cw['id']}"):
+                        ok, msg = delete_courseware(cw['id'], st.session_state.user_id)
+                        if ok:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+        else:
+            st.info("您还没有上传任何课件。")
         st.markdown('</div>', unsafe_allow_html=True)
