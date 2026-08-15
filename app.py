@@ -8,6 +8,7 @@ import bcrypt
 import datetime
 
 # ---------- 数据库连接函数（使用 st.secrets） ----------
+st.write(st.secrets.keys())
 def get_db_connection():
     return pymysql.connect(
         host=st.secrets["connections.mysql"]["host"],
