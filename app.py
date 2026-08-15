@@ -246,7 +246,7 @@ def get_all_courseware():
 # ---------- 主界面 ----------
 if not st.session_state.logged_in:
     # 登录/注册界面
-    st.markdown('<div class="main-title"><h1>🧑‍🏫 数智伴学 · 教育助教</h1><p>请登录或注册</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-title"><h1>🧸 数智伴学 · 碎碎念小助教</h1><p>请登录或注册</p></div>', unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["登录", "注册"])
     with tab1:
         with st.form("login_form"):
