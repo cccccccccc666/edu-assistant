@@ -1,35 +1,31 @@
 import streamlit as st
 from openai import OpenAI
 import os
-from dotenv import load_dotenv
 from pypdf import PdfReader
 import io
 import pymysql
 import bcrypt
 import datetime
 
-# ---------- 加载环境变量 ----------
-load_dotenv()
-
-# ---------- 数据库连接函数 ----------
+# ---------- 数据库连接函数（使用 st.secrets） ----------
 def get_db_connection():
     return pymysql.connect(
-        host=os.st.secrets["DB_HOST"],
-        port=int(os.st.secrets["DB_PORT", 3306]),
-        user=os.st.secrets["DB_USER"],
-        password=os.st.secrets["DB_PASSWORD"],
-        database=os.st.secrets["DB_NAME"],
+        host=st.secrets["connections.mysql"]["host"],
+        port=int(st.secrets["connections.mysql"]["port"]),
+        user=st.secrets["connections.mysql"]["username"],
+        password=st.secrets["connections.mysql"]["password"],
+        database=st.secrets["connections.mysql"]["database"],
         charset='utf8mb4',
         cursorclass=pymysql.cursors.DictCursor
     )
 
 # ---------- 初始化OpenAI客户端 ----------
 client = OpenAI(
-    api_key=os.st.secrets["DEEPSEEK_API_KEY"],
+    api_key=st.secrets["DEEPSEEK_API_KEY"],
     base_url="https://api.deepseek.com"
 )
 
-# ---------- 公共的AI调用函数（提前定义，放在最前面） ----------
+# ---------- 公共的AI调用函数 ----------
 def call_ai(system_prompt, user_message):
     try:
         response = client.chat.completions.create(
@@ -270,7 +266,7 @@ else:
             st.rerun()
 
     # 标题
-    st.markdown('<div class="main-title"><h1>🧑‍🏫 数智伴学 · 教育助教</h1><p style="font-size:0.8rem; color:#5a7a8a;">✨ </p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-title"><h1>🧑‍🏫 数智伴学 · 教育助教</h1><p style="font-size:0.8rem; color:#5a7a8a;">✨ 本作品由 XX 团队原创开发，部分内容由 AI 辅助生成</p></div>', unsafe_allow_html=True)
 
     # ---------- 根据角色显示功能模块 ----------
     if st.session_state.role == 'student':
