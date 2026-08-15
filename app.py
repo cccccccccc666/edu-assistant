@@ -41,8 +41,8 @@ def call_ai(system_prompt, user_message):
         return "暂时无法回答，请稍后重试。"
 
 # ---------- 页面配置 ----------
-st.set_page_config(page_title="数智伴学 · 教育助教", page_icon="🧑‍🏫")
 
+st.set_page_config(page_title="数智伴学 · 碎碎念小助教", page_icon="🧸")
 # ---------- 自定义CSS ----------
 st.markdown("""
 <style>
