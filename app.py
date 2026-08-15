@@ -299,7 +299,7 @@ else:
             st.query_params.clear()
             st.rerun()
 
-    st.markdown('<div class="main-title"><h1>🧑‍🏫 数智伴学 · 教育助教</h1><p style="font-size:0.8rem; color:#5a7a8a;">✨ </p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-title"><h1>🧑‍🏫 数智伴学 · 教育助教</h1><p style="font-size:0.8rem; color:#5a7a8a;"> </p></div>', unsafe_allow_html=True)
 
     if st.session_state.role == 'student':
         st.markdown('<div class="custom-card">', unsafe_allow_html=True)
