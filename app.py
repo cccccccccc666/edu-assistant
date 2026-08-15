@@ -5,6 +5,7 @@ import bcrypt
 from pypdf import PdfReader
 import io
 import random
+import os  # 新增，用于提取扩展名
 
 # ---------- 数据库连接函数（使用扁平 st.secrets） ----------
 def get_db_connection():
@@ -81,7 +82,6 @@ def restore_login_from_params():
 
 if not st.session_state.logged_in:
     if not restore_login_from_params():
-        # 未登录或恢复失败，显示登录/注册界面
         pass
     else:
         st.rerun()
@@ -129,13 +129,11 @@ def save_chat_message(user_id, role, content):
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            # 插入新记录
             cur.execute(
                 "INSERT INTO chat_history (user_id, role, content) VALUES (%s, %s, %s)",
                 (user_id, role, content)
             )
             conn.commit()
-            # 删除该用户多余的旧记录，只保留最近的3条
             cur.execute(
                 """
                 DELETE FROM chat_history 
@@ -176,12 +174,18 @@ def get_recent_chat(user_id, limit=3):
 
 # ---------- 辅助函数：课件上传（仅教师） ----------
 def upload_courseware(teacher_id, file_name, file_type, file_data):
+    # 提取文件扩展名作为存储的 file_type（解决MIME过长问题）
+    ext = file_name.split('.')[-1].lower()
+    # 限制扩展名长度（如果无扩展名则使用 'bin'）
+    if ext == file_name:  # 无扩展名
+        ext = 'bin'
+    
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO courseware (teacher_id, file_name, file_type, file_data) VALUES (%s, %s, %s, %s)",
-                (teacher_id, file_name, file_type, file_data)
+                (teacher_id, file_name, ext, file_data)
             )
             conn.commit()
             return True
@@ -325,12 +329,16 @@ else:
         if coursewares:
             for cw in coursewares:
                 st.write(f"📄 {cw['file_name']} (上传时间: {cw['upload_time']})")
-                if cw['file_type'] in ['text/plain', 'application/pdf']:
-                    if cw['file_type'] == 'text/plain':
-                        content = cw['file_data'].decode('utf-8')
-                        with st.expander("预览内容"):
-                            st.text(content)
-                    elif cw['file_type'] == 'application/pdf':
+                ext = cw['file_type']  # 存储的是扩展名
+                if ext in ['pdf', 'txt']:
+                    if ext == 'txt':
+                        try:
+                            content = cw['file_data'].decode('utf-8')
+                            with st.expander("预览内容"):
+                                st.text(content)
+                        except:
+                            st.warning("无法预览该文本文件")
+                    elif ext == 'pdf':
                         st.download_button(
                             label="下载PDF",
                             data=cw['file_data'],
@@ -338,6 +346,7 @@ else:
                             mime='application/pdf'
                         )
                 else:
+                    # 其他类型提供下载按钮
                     st.download_button(
                         label=f"下载 {cw['file_name']}",
                         data=cw['file_data'],
@@ -405,10 +414,11 @@ else:
         if uploaded_file is not None:
             file_data = uploaded_file.read()
             if st.button("确认上传"):
+                # 传入文件名和文件数据，内部提取扩展名
                 success = upload_courseware(
                     st.session_state.user_id,
                     uploaded_file.name,
-                    uploaded_file.type,
+                    uploaded_file.type,  # 这个参数现在被忽略，内部用扩展名
                     file_data
                 )
                 if success:
