@@ -4,6 +4,7 @@ import pymysql
 import bcrypt
 from pypdf import PdfReader
 import io
+import random
 
 # ---------- 数据库连接函数（使用扁平 st.secrets） ----------
 def get_db_connection():
@@ -67,6 +68,24 @@ if 'username' not in st.session_state:
 if 'role' not in st.session_state:
     st.session_state.role = None
 
+# ---------- 从 URL 参数恢复登录状态（刷新保持登录） ----------
+def restore_login_from_params():
+    params = st.query_params
+    if params.get("logged_in") == "true" and params.get("user_id"):
+        st.session_state.logged_in = True
+        st.session_state.user_id = int(params["user_id"])
+        st.session_state.username = params["username"]
+        st.session_state.role = params["role"]
+        return True
+    return False
+
+if not st.session_state.logged_in:
+    if not restore_login_from_params():
+        # 未登录或恢复失败，显示登录/注册界面
+        pass
+    else:
+        st.rerun()
+
 # ---------- 辅助函数：用户注册 ----------
 def register_user(username, password, role):
     conn = get_db_connection()
@@ -105,14 +124,32 @@ def login_user(username, password):
     finally:
         conn.close()
 
-# ---------- 辅助函数：保存聊天记录 ----------
+# ---------- 辅助函数：保存聊天记录（只保留最近3条） ----------
 def save_chat_message(user_id, role, content):
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
+            # 插入新记录
             cur.execute(
                 "INSERT INTO chat_history (user_id, role, content) VALUES (%s, %s, %s)",
                 (user_id, role, content)
+            )
+            conn.commit()
+            # 删除该用户多余的旧记录，只保留最近的3条
+            cur.execute(
+                """
+                DELETE FROM chat_history 
+                WHERE user_id = %s 
+                AND id NOT IN (
+                    SELECT id FROM (
+                        SELECT id FROM chat_history 
+                        WHERE user_id = %s 
+                        ORDER BY created_at DESC 
+                        LIMIT 3
+                    ) AS tmp
+                )
+                """,
+                (user_id, user_id)
             )
             conn.commit()
     except Exception as e:
@@ -175,7 +212,6 @@ def delete_courseware(courseware_id, teacher_id):
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            # 先验证该课件是否属于该教师
             cur.execute(
                 "SELECT id FROM courseware WHERE id = %s AND teacher_id = %s",
                 (courseware_id, teacher_id)
@@ -205,6 +241,7 @@ def get_all_courseware():
 
 # ---------- 主界面 ----------
 if not st.session_state.logged_in:
+    # 登录/注册界面
     st.markdown('<div class="main-title"><h1>🧑‍🏫 数智伴学 · 教育助教</h1><p>请登录或注册</p></div>', unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["登录", "注册"])
     with tab1:
@@ -219,6 +256,10 @@ if not st.session_state.logged_in:
                     st.session_state.user_id = result['id']
                     st.session_state.username = result['username']
                     st.session_state.role = result['role']
+                    st.query_params.logged_in = "true"
+                    st.query_params.user_id = str(result['id'])
+                    st.query_params.username = result['username']
+                    st.query_params.role = result['role']
                     st.rerun()
                 else:
                     st.error(result)
@@ -241,6 +282,7 @@ if not st.session_state.logged_in:
                     else:
                         st.error(msg)
 else:
+    # ---------- 已登录主界面 ----------
     col1, col2, col3 = st.columns([5, 1, 1])
     with col1:
         st.markdown(f'<div style="font-size:1.2rem; font-weight:600;">👋 欢迎，{st.session_state.username} ({ {"student":"学生", "parent":"家长", "teacher":"教师"}[st.session_state.role] })</div>', unsafe_allow_html=True)
@@ -250,6 +292,7 @@ else:
             st.session_state.user_id = None
             st.session_state.username = None
             st.session_state.role = None
+            st.query_params.clear()
             st.rerun()
 
     st.markdown('<div class="main-title"><h1>🧑‍🏫 数智伴学 · 教育助教</h1><p style="font-size:0.8rem; color:#5a7a8a;">✨ 本作品由 XX 团队原创开发，部分内容由 AI 辅助生成</p></div>', unsafe_allow_html=True)
@@ -282,16 +325,24 @@ else:
         if coursewares:
             for cw in coursewares:
                 st.write(f"📄 {cw['file_name']} (上传时间: {cw['upload_time']})")
-                if cw['file_type'] == 'text/plain':
-                    content = cw['file_data'].decode('utf-8')
-                    with st.expander("预览内容"):
-                        st.text(content)
-                elif cw['file_type'] == 'application/pdf':
+                if cw['file_type'] in ['text/plain', 'application/pdf']:
+                    if cw['file_type'] == 'text/plain':
+                        content = cw['file_data'].decode('utf-8')
+                        with st.expander("预览内容"):
+                            st.text(content)
+                    elif cw['file_type'] == 'application/pdf':
+                        st.download_button(
+                            label="下载PDF",
+                            data=cw['file_data'],
+                            file_name=cw['file_name'],
+                            mime='application/pdf'
+                        )
+                else:
                     st.download_button(
-                        label="下载PDF",
+                        label=f"下载 {cw['file_name']}",
                         data=cw['file_data'],
                         file_name=cw['file_name'],
-                        mime='application/pdf'
+                        mime='application/octet-stream'
                     )
         else:
             st.info("暂无课件")
@@ -344,7 +395,13 @@ else:
         # 课件上传区域
         st.markdown('<div class="custom-card">', unsafe_allow_html=True)
         st.subheader("📤 上传课件（供学生预览）")
-        uploaded_file = st.file_uploader("选择文件（支持 TXT / PDF）", type=["txt", "pdf"])
+        if 'upload_key' not in st.session_state:
+            st.session_state.upload_key = str(random.randint(0, 1000000))
+        uploaded_file = st.file_uploader(
+            "选择文件（支持 PDF, TXT, PPT, PPTX, DOC, DOCX）",
+            type=["pdf", "txt", "ppt", "pptx", "doc", "docx"],
+            key=st.session_state.upload_key
+        )
         if uploaded_file is not None:
             file_data = uploaded_file.read()
             if st.button("确认上传"):
@@ -356,6 +413,7 @@ else:
                 )
                 if success:
                     st.success("课件上传成功！")
+                    st.session_state.upload_key = str(random.randint(0, 1000000))
                     st.rerun()
                 else:
                     st.error("上传失败")
