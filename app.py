@@ -41,7 +41,6 @@ def call_ai(system_prompt, user_message):
         return "暂时无法回答，请稍后重试。"
 
 # ---------- 页面配置 ----------
-
 st.set_page_config(page_title="数智伴学 · 碎碎念小助教", page_icon="🧸")
 # ---------- 自定义CSS ----------
 st.markdown("""
@@ -343,7 +342,8 @@ else:
                             label="下载PDF",
                             data=cw['file_data'],
                             file_name=cw['file_name'],
-                            mime='application/pdf'
+                            mime='application/pdf',
+                            key=f"dl_pdf_{cw['id']}"          # 添加唯一 key
                         )
                 else:
                     # 其他类型提供下载按钮
@@ -351,7 +351,8 @@ else:
                         label=f"下载 {cw['file_name']}",
                         data=cw['file_data'],
                         file_name=cw['file_name'],
-                        mime='application/octet-stream'
+                        mime='application/octet-stream',
+                        key=f"dl_{cw['id']}"                # 添加唯一 key
                     )
         else:
             st.info("暂无课件")
