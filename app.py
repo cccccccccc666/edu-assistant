@@ -7,8 +7,8 @@ import io
 import random
 import os
 import pandas as pd
-import re              # 新增
-from collections import Counter  # 新增
+import re
+from collections import Counter
 
 # ---------- 数据库连接函数（使用扁平 st.secrets） ----------
 def get_db_connection():
@@ -274,12 +274,11 @@ def get_dashboard_stats():
     finally:
         conn.close()
 
-# ---------- 新增：获取学生热门提问词（仅统计学生角色） ----------
+# ---------- 获取学生热门提问词（智能合并相似词） ----------
 def get_student_hot_keywords(top_n=10):
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            # 关联 users 表过滤 role='student'，只取学生提问
             cur.execute("""
                 SELECT c.content
                 FROM chat_history c
@@ -289,14 +288,114 @@ def get_student_hot_keywords(top_n=10):
             rows = cur.fetchall()
             if not rows:
                 return []
-            text = " ".join([row['content'] for row in rows if row['content']])
-            # 提取中英文单词（长度>=2）
-            words = re.findall(r'[\u4e00-\u9fa5a-zA-Z]{2,}', text)
-            # 停用词表
-            stopwords = {'的', '了', '是', '我', '你', '他', '她', '它', '们', '就', '在', '有', '和', '与', '或', '但', '而', '所', '也', '还', '等', '里', '中', '上', '下', '不', '这', '那', '一', '个', '去', '来', '到', '对', '从', '会', '可', '能', '以', '之', '被', '把', '给', '让', '用', '因', '为', '如', '果', '时', '后', '前', '左', '右', '大', '小', '多', '少', '更', '最', '很', '太', '真', '好', '坏', '新', '旧', '开', '关', '正', '反', '方', '法', '学', '习', '问', '题', '答', '案', '做', '出', '入', '处', '理', '程', '序', '员', '什么', '怎么', '如何', '为什么', '哪个', '哪些', '怎样', '能否', '是不是'}
-            filtered = [w for w in words if w not in stopwords and len(w) > 1]
-            counter = Counter(filtered)
-            return counter.most_common(top_n)
+
+            # 第一步：合并所有提问文本
+            full_text = " ".join([row['content'] for row in rows if row['content']])
+
+            # 第二步：去除常见的“解释一下”、“请问”、“如何”等前缀/后缀干扰
+            clean_text = re.sub(r'(解释一下|解释|请问|什么是|什么叫|如何|怎么|怎样|能不能|说一下|讲讲|告诉|告诉我|给我|帮忙|帮我|我想问|我问|问一下|请教)', '', full_text)
+            # 去除多余空格
+            clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+
+            # 第三步：提取中英文核心词（长度>=2）
+            words = re.findall(r'[\u4e00-\u9fa5a-zA-Z]{2,}', clean_text)
+
+            # 第四步：停用词表（扩充了常见无意义词）
+            stopwords = {
+                '的', '了', '是', '我', '你', '他', '她', '它', '们', '就', '在', '有', '和', '与', '或',
+                '但', '而', '所', '也', '还', '等', '里', '中', '上', '下', '不', '这', '那', '一', '个',
+                '去', '来', '到', '对', '从', '会', '可', '能', '以', '之', '被', '把', '给', '让', '用',
+                '因', '为', '如', '果', '时', '后', '前', '左', '右', '大', '小', '多', '少', '更', '最',
+                '很', '太', '真', '好', '坏', '新', '旧', '开', '关', '正', '反', '方', '法', '做', '出',
+                '入', '处', '理', '程', '序', '员', '人', '物', '件', '事', '些', '种', '样', '点', '道',
+                '么', '么的', '下子', '一下', '那个', '这个', '那个', '哪个', '哪些', '什么', '怎么', '如何',
+                '为什么', '哪个', '哪些', '怎样', '能否', '是不是', '有没有', '可不可以', '可不', '可以',
+                # 增加英文停用词
+                'the', 'a', 'an', 'to', 'for', 'of', 'with', 'on', 'at', 'from', 'by', 'in', 'as'
+            }
+
+            # 第五步：过滤停用词
+            filtered = [w.lower() for w in words if w.lower() not in stopwords and len(w) > 1]
+
+            # 第六步：同义词合并（将同义的不同表达映射到标准词）
+            # 可继续扩充此映射表
+            synonym_map = {
+                '深拷贝': ['deepcopy', 'deep copy', '深度拷贝', '深复制'],
+                '浅拷贝': ['shallowcopy', 'shallow copy', '浅度拷贝', '浅复制'],
+                '列表推导': ['list comprehension', '列表解析', '列表生成式'],
+                '机器学习': ['machine learning', 'ml', '学习机器'],
+                '深度学习': ['deep learning', 'dl'],
+                '人工智能': ['artificial intelligence', 'ai'],
+                '神经网络': ['neural network', 'nn', '神经网络模型'],
+                '卷积网络': ['cnn', '卷积神经网络'],
+                '循环网络': ['rnn', '循环神经网络'],
+                '生成对抗': ['gan', '生成对抗网络'],
+                '过拟合': ['overfitting', '过拟合现象'],
+                '欠拟合': ['underfitting', '欠拟合现象'],
+                '梯度下降': ['gradient descent', '梯度下降法'],
+                '损失函数': ['loss function', '代价函数'],
+                '激活函数': ['activation function', '激励函数'],
+                '正则化': ['regularization', '正规化'],
+                '归一化': ['normalization', '规范化'],
+                'dropout': ['dropout层', '丢弃法'],
+                '反向传播': ['backpropagation', 'bp', '反向传播算法'],
+                '前向传播': ['forward propagation', '前馈传播'],
+                'batch size': ['batch', '批大小', '批次大小'],
+                '学习率': ['learning rate', 'lr'],
+                'epoch': ['训练轮次', '迭代周期'],
+                'numpy': ['numpy库', 'np'],
+                'pandas': ['pandas库', 'pd'],
+                'scikit learn': ['sklearn', 'scikit', 'sk-learn'],
+                'tensorflow': ['tf', 'tensorflow库'],
+                'pytorch': ['torch', 'pytorch库'],
+                'python': ['python语言', 'py', 'python程序', 'python编程'],
+                '编程': ['编程语言', '编程基础', '编程入门'],
+                '矩阵': ['矩阵运算', '矩阵乘法', '矩阵乘法运算'],
+                '向量': ['向量运算', '向量计算'],
+                '张量': ['tensor', '张量运算'],
+                '分类': ['分类问题', '分类器', '分类模型'],
+                '回归': ['回归分析', '回归模型', '回归问题'],
+                '聚类': ['聚类算法', '聚类分析', '聚类问题'],
+                '数据清洗': ['数据预处理', '数据清理', '数据整理'],
+                '特征工程': ['特征选择', '特征抽取', '特征提取'],
+                '模型评估': ['模型评价', '模型验证', '模型测试'],
+            }
+
+            # 构建反向映射（同义词 -> 标准词）
+            reverse_map = {}
+            for standard, synonyms in synonym_map.items():
+                reverse_map[standard] = standard
+                for syn in synonyms:
+                    reverse_map[syn] = standard
+
+            # 应用同义词映射
+            mapped_words = []
+            for w in filtered:
+                # 标准化：去空格、转小写
+                w_clean = w.lower().strip()
+                if w_clean in reverse_map:
+                    mapped_words.append(reverse_map[w_clean])
+                else:
+                    mapped_words.append(w_clean)
+
+            # 第七步：统计词频
+            counter = Counter(mapped_words)
+
+            # 第八步：返回前 top_n 个，过滤掉出现次数为1的词（可选）
+            result = [(word, count) for word, count in counter.most_common(top_n) if count > 1]
+
+            # 如果结果不足，补上一些高频但可能单独出现的词
+            if len(result) < top_n:
+                all_words = [w for w in filtered if len(w) > 1]
+                all_counter = Counter(all_words)
+                for word, count in all_counter.most_common(top_n):
+                    if not any(word == r[0] for r in result):
+                        result.append((word, count))
+                        if len(result) >= top_n:
+                            break
+
+            return result[:top_n]
+
     except Exception as e:
         st.error(f"获取学生热门词失败：{e}")
         return []
@@ -545,7 +644,7 @@ else:
             else:
                 st.info("暂无提问数据，快去提问吧！")
 
-            # ---------- 新增：显示学生热门提问词 ----------
+            # ---------- 显示学生热门提问词（已合并相似词） ----------
             st.divider()
             st.subheader("🔥 学生热门提问词")
             hot_words = get_student_hot_keywords(10)
