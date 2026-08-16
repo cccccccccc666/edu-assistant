@@ -5,7 +5,10 @@ import bcrypt
 from pypdf import PdfReader
 import io
 import random
-import os  # 新增，用于提取扩展名
+import os
+import re
+from collections import Counter
+from datetime import datetime
 
 # ---------- 数据库连接函数（使用扁平 st.secrets） ----------
 def get_db_connection():
@@ -55,6 +58,9 @@ st.markdown("""
     .user-bubble { background: #4f8bc9; color: white; border-radius: 22px 22px 6px 22px; padding: 12px 20px; margin: 8px 0; display: inline-block; max-width: 80%; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
     .assistant-bubble { background: white; color: #1e293b; border-radius: 22px 22px 22px 6px; padding: 12px 20px; margin: 8px 0; display: inline-block; max-width: 80%; box-shadow: 0 2px 10px rgba(0,0,0,0.04); }
     .stFileUploader { border: 2px dashed #4f8bc9 !important; border-radius: 28px !important; background: rgba(255,255,255,0.5) !important; }
+    /* 看板数字样式 */
+    .stat-number { font-size: 2.2rem; font-weight: 700; color: #1e3c5c; }
+    .stat-label { font-size: 0.9rem; color: #5a7a8a; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -173,12 +179,9 @@ def get_recent_chat(user_id, limit=3):
 
 # ---------- 辅助函数：课件上传（仅教师） ----------
 def upload_courseware(teacher_id, file_name, file_type, file_data):
-    # 提取文件扩展名作为存储的 file_type（解决MIME过长问题）
     ext = file_name.split('.')[-1].lower()
-    # 限制扩展名长度（如果无扩展名则使用 'bin'）
-    if ext == file_name:  # 无扩展名
+    if ext == file_name:
         ext = 'bin'
-
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
@@ -242,9 +245,40 @@ def get_all_courseware():
     finally:
         conn.close()
 
+# ---------- 新增：学情统计函数 ----------
+def get_dashboard_stats():
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            # 今日提问数（所有用户）
+            cur.execute("SELECT COUNT(*) as count FROM chat_history WHERE DATE(created_at)=CURDATE()")
+            today_chat = cur.fetchone()['count']
+            # 总课件数
+            cur.execute("SELECT COUNT(*) as count FROM courseware")
+            total_ppt = cur.fetchone()['count']
+            # 获取最近100条用户提问（用于提取热门词）
+            cur.execute("SELECT content FROM chat_history WHERE role='user' ORDER BY created_at DESC LIMIT 100")
+            rows = cur.fetchall()
+            questions = [row['content'] for row in rows]
+            # 简单分词（中文按字符，英文按单词）
+            word_list = []
+            for q in questions:
+                # 只保留中英文和数字，去除标点
+                cleaned = re.sub(r'[^\w\u4e00-\u9fff]', ' ', q)
+                words = cleaned.split()
+                word_list.extend([w for w in words if len(w) >= 2])  # 忽略单字符
+            # 统计高频词，取前3
+            counter = Counter(word_list)
+            top3 = [word for word, cnt in counter.most_common(3)] if counter else ["暂无数据"]
+            return today_chat, total_ppt, top3
+    except Exception as e:
+        st.error(f"读取统计数据失败：{e}")
+        return 0, 0, []
+    finally:
+        conn.close()
+
 # ---------- 主界面 ----------
 if not st.session_state.logged_in:
-    # 登录/注册界面
     st.markdown('<div class="main-title"><h1>🧸 数智伴学 · 碎碎念小助教</h1><p>请登录或注册</p></div>', unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["登录", "注册"])
     with tab1:
@@ -285,7 +319,6 @@ if not st.session_state.logged_in:
                     else:
                         st.error(msg)
 else:
-    # ---------- 已登录主界面 ----------
     col1, col2, col3 = st.columns([5, 1, 1])
     with col1:
         st.markdown(f'<div style="font-size:1.2rem; font-weight:600;">👋 欢迎，{st.session_state.username} ({ {"student":"学生", "parent":"家长", "teacher":"教师"}[st.session_state.role] })</div>', unsafe_allow_html=True)
@@ -328,7 +361,7 @@ else:
         if coursewares:
             for cw in coursewares:
                 st.write(f"📄 {cw['file_name']} (上传时间: {cw['upload_time']})")
-                ext = cw['file_type']  # 存储的是扩展名
+                ext = cw['file_type']
                 if ext in ['pdf', 'txt']:
                     if ext == 'txt':
                         try:
@@ -343,16 +376,15 @@ else:
                             data=cw['file_data'],
                             file_name=cw['file_name'],
                             mime='application/pdf',
-                            key=f"dl_pdf_{cw['id']}"          # 添加唯一 key
+                            key=f"dl_pdf_{cw['id']}"
                         )
                 else:
-                    # 其他类型提供下载按钮
                     st.download_button(
                         label=f"下载 {cw['file_name']}",
                         data=cw['file_data'],
                         file_name=cw['file_name'],
                         mime='application/octet-stream',
-                        key=f"dl_{cw['id']}"                # 添加唯一 key
+                        key=f"dl_{cw['id']}"
                     )
         else:
             st.info("暂无课件")
@@ -380,6 +412,22 @@ else:
         st.markdown('</div>', unsafe_allow_html=True)
 
     else:  # teacher
+        # ---------- 新增：学情分析看板 ----------
+        st.markdown('<div class="custom-card">', unsafe_allow_html=True)
+        st.subheader("📊 学情分析小看板")
+        today_chat, total_ppt, hot_topics = get_dashboard_stats()
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            st.markdown(f'<div class="stat-number">{today_chat}</div><div class="stat-label">今日答疑总数</div>', unsafe_allow_html=True)
+        with col_b:
+            st.markdown(f'<div class="stat-number">{total_ppt}</div><div class="stat-label">累计课件数</div>', unsafe_allow_html=True)
+        with col_c:
+            top_str = "、".join(hot_topics)
+            st.markdown(f'<div class="stat-number">🔥</div><div class="stat-label">热门提问词：{top_str}</div>', unsafe_allow_html=True)
+        st.caption("数据自动更新，仅教师可见")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # 教研辅助（原有）
         st.markdown('<div class="custom-card">', unsafe_allow_html=True)
         st.subheader("📝 AI 教研辅助")
         st.caption("🤖 我是教学助手，可以帮助你生成教案、设计习题、提供教学建议。")
@@ -415,11 +463,10 @@ else:
         if uploaded_file is not None:
             file_data = uploaded_file.read()
             if st.button("确认上传"):
-                # 传入文件名和文件数据，内部提取扩展名
                 success = upload_courseware(
                     st.session_state.user_id,
                     uploaded_file.name,
-                    uploaded_file.type,  # 这个参数现在被忽略，内部用扩展名
+                    uploaded_file.type,
                     file_data
                 )
                 if success:
