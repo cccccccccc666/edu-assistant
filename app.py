@@ -7,8 +7,8 @@ import io
 import random
 import os
 import pandas as pd
-import re          # 新增：用于提取单词
-from collections import Counter  # 新增：用于统计词频
+import re              # 新增
+from collections import Counter  # 新增
 
 # ---------- 数据库连接函数（使用扁平 st.secrets） ----------
 def get_db_connection():
@@ -274,28 +274,31 @@ def get_dashboard_stats():
     finally:
         conn.close()
 
-# ---------- 辅助函数：获取热门提问词（新增） ----------
-def get_hot_keywords(top_n=10):
+# ---------- 新增：获取学生热门提问词（仅统计学生角色） ----------
+def get_student_hot_keywords(top_n=10):
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            # 只取用户提问的内容
-            cur.execute("SELECT content FROM chat_history WHERE role = 'user'")
+            # 关联 users 表过滤 role='student'，只取学生提问
+            cur.execute("""
+                SELECT c.content
+                FROM chat_history c
+                JOIN users u ON c.user_id = u.id
+                WHERE u.role = 'student' AND c.role = 'user'
+            """)
             rows = cur.fetchall()
             if not rows:
                 return []
-            # 合并所有文本
             text = " ".join([row['content'] for row in rows if row['content']])
             # 提取中英文单词（长度>=2）
             words = re.findall(r'[\u4e00-\u9fa5a-zA-Z]{2,}', text)
-            # 停用词表（可自行扩充）
+            # 停用词表
             stopwords = {'的', '了', '是', '我', '你', '他', '她', '它', '们', '就', '在', '有', '和', '与', '或', '但', '而', '所', '也', '还', '等', '里', '中', '上', '下', '不', '这', '那', '一', '个', '去', '来', '到', '对', '从', '会', '可', '能', '以', '之', '被', '把', '给', '让', '用', '因', '为', '如', '果', '时', '后', '前', '左', '右', '大', '小', '多', '少', '更', '最', '很', '太', '真', '好', '坏', '新', '旧', '开', '关', '正', '反', '方', '法', '学', '习', '问', '题', '答', '案', '做', '出', '入', '处', '理', '程', '序', '员', '什么', '怎么', '如何', '为什么', '哪个', '哪些', '怎样', '能否', '是不是'}
-            # 过滤停用词和长度<2的词
             filtered = [w for w in words if w not in stopwords and len(w) > 1]
             counter = Counter(filtered)
             return counter.most_common(top_n)
     except Exception as e:
-        st.error(f"获取热门词失败：{e}")
+        st.error(f"获取学生热门词失败：{e}")
         return []
     finally:
         conn.close()
@@ -542,10 +545,10 @@ else:
             else:
                 st.info("暂无提问数据，快去提问吧！")
 
-            # ---------- 新增：热门提问词 ----------
+            # ---------- 新增：显示学生热门提问词 ----------
             st.divider()
-            st.subheader("🔥 热门提问词")
-            hot_words = get_hot_keywords(10)
+            st.subheader("🔥 学生热门提问词")
+            hot_words = get_student_hot_keywords(10)
             if hot_words:
                 cols = st.columns(min(len(hot_words), 5))
                 for idx, (word, count) in enumerate(hot_words):
@@ -555,8 +558,8 @@ else:
                             unsafe_allow_html=True
                         )
             else:
-                st.info("暂无提问数据，无法生成热门词。")
-            # ----------------------------------
+                st.info("暂无学生提问数据，无法生成热门词。")
+            # ---------------------------------------------
 
             st.divider()
             st.caption("💡 小提示：数据每5分钟自动更新，真实反映教学互动情况。")
