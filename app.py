@@ -6,9 +6,7 @@ from pypdf import PdfReader
 import io
 import random
 import os
-import re
-from collections import Counter
-from datetime import datetime
+import pandas as pd
 
 # ---------- 数据库连接函数（使用扁平 st.secrets） ----------
 def get_db_connection():
@@ -45,6 +43,7 @@ def call_ai(system_prompt, user_message):
 
 # ---------- 页面配置 ----------
 st.set_page_config(page_title="数智伴学 · 碎碎念小助教", page_icon="🧸")
+
 # ---------- 自定义CSS ----------
 st.markdown("""
 <style>
@@ -58,9 +57,6 @@ st.markdown("""
     .user-bubble { background: #4f8bc9; color: white; border-radius: 22px 22px 6px 22px; padding: 12px 20px; margin: 8px 0; display: inline-block; max-width: 80%; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
     .assistant-bubble { background: white; color: #1e293b; border-radius: 22px 22px 22px 6px; padding: 12px 20px; margin: 8px 0; display: inline-block; max-width: 80%; box-shadow: 0 2px 10px rgba(0,0,0,0.04); }
     .stFileUploader { border: 2px dashed #4f8bc9 !important; border-radius: 28px !important; background: rgba(255,255,255,0.5) !important; }
-    /* 看板数字样式 */
-    .stat-number { font-size: 2.2rem; font-weight: 700; color: #1e3c5c; }
-    .stat-label { font-size: 0.9rem; color: #5a7a8a; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -232,12 +228,17 @@ def delete_courseware(courseware_id, teacher_id):
     finally:
         conn.close()
 
-# ---------- 辅助函数：获取所有课件（学生预览） ----------
+# ---------- 辅助函数：获取所有课件（学生预览）含教师名 ----------
 def get_all_courseware():
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, file_name, file_type, file_data, upload_time FROM courseware ORDER BY upload_time DESC")
+            cur.execute("""
+                SELECT c.id, c.file_name, c.file_type, c.file_data, c.upload_time, u.username as teacher_name
+                FROM courseware c
+                JOIN users u ON c.teacher_id = u.id
+                ORDER BY c.upload_time DESC
+            """)
             return cur.fetchall()
     except Exception as e:
         st.error(f"读取课件失败：{e}")
@@ -245,35 +246,29 @@ def get_all_courseware():
     finally:
         conn.close()
 
-# ---------- 新增：学情统计函数 ----------
+# ---------- 辅助函数：获取学情统计数据（教师看板） ----------
 def get_dashboard_stats():
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            # 今日提问数（所有用户）
             cur.execute("SELECT COUNT(*) as count FROM chat_history WHERE DATE(created_at)=CURDATE()")
             today_chat = cur.fetchone()['count']
-            # 总课件数
             cur.execute("SELECT COUNT(*) as count FROM courseware")
             total_ppt = cur.fetchone()['count']
-            # 获取最近100条用户提问（用于提取热门词）
-            cur.execute("SELECT content FROM chat_history WHERE role='user' ORDER BY created_at DESC LIMIT 100")
-            rows = cur.fetchall()
-            questions = [row['content'] for row in rows]
-            # 简单分词（中文按字符，英文按单词）
-            word_list = []
-            for q in questions:
-                # 只保留中英文和数字，去除标点
-                cleaned = re.sub(r'[^\w\u4e00-\u9fff]', ' ', q)
-                words = cleaned.split()
-                word_list.extend([w for w in words if len(w) >= 2])  # 忽略单字符
-            # 统计高频词，取前3
-            counter = Counter(word_list)
-            top3 = [word for word, cnt in counter.most_common(3)] if counter else ["暂无数据"]
-            return today_chat, total_ppt, top3
+            cur.execute("SELECT COUNT(*) as count FROM users")
+            total_users = cur.fetchone()['count']
+            cur.execute("""
+                SELECT DATE(created_at) as date, COUNT(*) as count 
+                FROM chat_history 
+                WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                GROUP BY DATE(created_at)
+                ORDER BY date ASC
+            """)
+            trend_data = cur.fetchall()
+            return today_chat, total_ppt, total_users, trend_data
     except Exception as e:
         st.error(f"读取统计数据失败：{e}")
-        return 0, 0, []
+        return 0, 0, 0, []
     finally:
         conn.close()
 
@@ -319,6 +314,7 @@ if not st.session_state.logged_in:
                     else:
                         st.error(msg)
 else:
+    # ---------- 已登录主界面 ----------
     col1, col2, col3 = st.columns([5, 1, 1])
     with col1:
         st.markdown(f'<div style="font-size:1.2rem; font-weight:600;">👋 欢迎，{st.session_state.username} ({ {"student":"学生", "parent":"家长", "teacher":"教师"}[st.session_state.role] })</div>', unsafe_allow_html=True)
@@ -360,8 +356,9 @@ else:
         coursewares = get_all_courseware()
         if coursewares:
             for cw in coursewares:
-                st.write(f"📄 {cw['file_name']} (上传时间: {cw['upload_time']})")
-                ext = cw['file_type']
+                # 显示课件名、上传者、上传时间
+                st.write(f"📄 **{cw['file_name']}**  — 由 **{cw['teacher_name']}** 上传于 {cw['upload_time']}")
+                ext = cw['file_type']  # 存储的是扩展名
                 if ext in ['pdf', 'txt']:
                     if ext == 'txt':
                         try:
@@ -386,6 +383,7 @@ else:
                         mime='application/octet-stream',
                         key=f"dl_{cw['id']}"
                     )
+                st.write("---")  # 分割线
         else:
             st.info("暂无课件")
         st.markdown('</div>', unsafe_allow_html=True)
@@ -412,88 +410,111 @@ else:
         st.markdown('</div>', unsafe_allow_html=True)
 
     else:  # teacher
-        # ---------- 新增：学情分析看板 ----------
-        st.markdown('<div class="custom-card">', unsafe_allow_html=True)
-        st.subheader("📊 学情分析小看板")
-        today_chat, total_ppt, hot_topics = get_dashboard_stats()
-        col_a, col_b, col_c = st.columns(3)
-        with col_a:
-            st.markdown(f'<div class="stat-number">{today_chat}</div><div class="stat-label">今日答疑总数</div>', unsafe_allow_html=True)
-        with col_b:
-            st.markdown(f'<div class="stat-number">{total_ppt}</div><div class="stat-label">累计课件数</div>', unsafe_allow_html=True)
-        with col_c:
-            top_str = "、".join(hot_topics)
-            st.markdown(f'<div class="stat-number">🔥</div><div class="stat-label">热门提问词：{top_str}</div>', unsafe_allow_html=True)
-        st.caption("数据自动更新，仅教师可见")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # 教研辅助（原有）
-        st.markdown('<div class="custom-card">', unsafe_allow_html=True)
-        st.subheader("📝 AI 教研辅助")
-        st.caption("🤖 我是教学助手，可以帮助你生成教案、设计习题、提供教学建议。")
-        task = st.selectbox("选择教研任务", ["生成教案", "设计课堂习题", "教学建议与策略"])
-        user_input = st.text_area("请输入主题或具体要求", placeholder="例如：面向大一学生的《人工智能导论》第3章教案")
-        if st.button("🚀 生成内容", use_container_width=True):
-            if user_input.strip():
-                with st.spinner("生成中..."):
-                    if task == "生成教案":
-                        system_prompt = "你是一位资深高校教师，请根据主题生成一份结构清晰、包含教学目标、重难点、教学过程、课后作业的教案。"
-                    elif task == "设计课堂习题":
-                        system_prompt = "你是一位资深高校教师，请根据主题设计5-8道课堂习题，包括选择题、简答题和讨论题，并附参考答案。"
-                    else:
-                        system_prompt = "你是一位资深高校教师，请针对该主题提供教学策略、课堂活动建议和常见学生误区分析。"
-                    reply = call_ai(system_prompt, user_input)
-                    st.success("✅ 生成完成")
-                    st.markdown(reply)
-            else:
-                st.warning("请输入主题或具体要求")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        st.markdown("---")
-        # 课件上传区域
-        st.markdown('<div class="custom-card">', unsafe_allow_html=True)
-        st.subheader("📤 上传课件（供学生预览）")
-        if 'upload_key' not in st.session_state:
-            st.session_state.upload_key = str(random.randint(0, 1000000))
-        uploaded_file = st.file_uploader(
-            "选择文件（支持 PDF, TXT, PPT, PPTX, DOC, DOCX）",
-            type=["pdf", "txt", "ppt", "pptx", "doc", "docx"],
-            key=st.session_state.upload_key
+        # 教师端子菜单切换
+        teacher_mode = st.radio(
+            "选择功能",
+            ["📝 教研辅助", "📊 学情看板"],
+            horizontal=True,
+            key="teacher_mode"
         )
-        if uploaded_file is not None:
-            file_data = uploaded_file.read()
-            if st.button("确认上传"):
-                success = upload_courseware(
-                    st.session_state.user_id,
-                    uploaded_file.name,
-                    uploaded_file.type,
-                    file_data
-                )
-                if success:
-                    st.success("课件上传成功！")
-                    st.session_state.upload_key = str(random.randint(0, 1000000))
-                    st.rerun()
-                else:
-                    st.error("上传失败")
-        st.markdown('</div>', unsafe_allow_html=True)
 
-        # 显示该教师已上传的课件，并提供删除按钮
-        st.markdown('<div class="custom-card">', unsafe_allow_html=True)
-        st.subheader("📋 我上传的课件")
-        teacher_cw = get_teacher_courseware(st.session_state.user_id)
-        if teacher_cw:
-            for cw in teacher_cw:
-                col1, col2 = st.columns([4, 1])
-                with col1:
-                    st.write(f"📄 {cw['file_name']} (上传于 {cw['upload_time']})")
-                with col2:
-                    if st.button("❌ 删除", key=f"del_{cw['id']}"):
-                        ok, msg = delete_courseware(cw['id'], st.session_state.user_id)
-                        if ok:
-                            st.success(msg)
-                            st.rerun()
+        if teacher_mode == "📝 教研辅助":
+            st.markdown('<div class="custom-card">', unsafe_allow_html=True)
+            st.subheader("📝 AI 教研辅助")
+            st.caption("🤖 我是教学助手，可以帮助你生成教案、设计习题、提供教学建议。")
+            task = st.selectbox("选择教研任务", ["生成教案", "设计课堂习题", "教学建议与策略"])
+            user_input = st.text_area("请输入主题或具体要求", placeholder="例如：面向大一学生的《人工智能导论》第3章教案")
+            if st.button("🚀 生成内容", use_container_width=True):
+                if user_input.strip():
+                    with st.spinner("生成中..."):
+                        if task == "生成教案":
+                            system_prompt = "你是一位资深高校教师，请根据主题生成一份结构清晰、包含教学目标、重难点、教学过程、课后作业的教案。"
+                        elif task == "设计课堂习题":
+                            system_prompt = "你是一位资深高校教师，请根据主题设计5-8道课堂习题，包括选择题、简答题和讨论题，并附参考答案。"
                         else:
-                            st.error(msg)
-        else:
-            st.info("您还没有上传任何课件。")
-        st.markdown('</div>', unsafe_allow_html=True)
+                            system_prompt = "你是一位资深高校教师，请针对该主题提供教学策略、课堂活动建议和常见学生误区分析。"
+                        reply = call_ai(system_prompt, user_input)
+                        st.success("✅ 生成完成")
+                        st.markdown(reply)
+                else:
+                    st.warning("请输入主题或具体要求")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            st.markdown("---")
+            st.markdown('<div class="custom-card">', unsafe_allow_html=True)
+            st.subheader("📤 上传课件（供学生预览）")
+            if 'upload_key' not in st.session_state:
+                st.session_state.upload_key = str(random.randint(0, 1000000))
+            uploaded_file = st.file_uploader(
+                "选择文件（支持 PDF, TXT, PPT, PPTX, DOC, DOCX）",
+                type=["pdf", "txt", "ppt", "pptx", "doc", "docx"],
+                key=st.session_state.upload_key
+            )
+            if uploaded_file is not None:
+                file_data = uploaded_file.read()
+                if st.button("确认上传"):
+                    success = upload_courseware(
+                        st.session_state.user_id,
+                        uploaded_file.name,
+                        uploaded_file.type,
+                        file_data
+                    )
+                    if success:
+                        st.success("课件上传成功！")
+                        st.session_state.upload_key = str(random.randint(0, 1000000))
+                        st.rerun()
+                    else:
+                        st.error("上传失败")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            st.markdown('<div class="custom-card">', unsafe_allow_html=True)
+            st.subheader("📋 我上传的课件")
+            teacher_cw = get_teacher_courseware(st.session_state.user_id)
+            if teacher_cw:
+                for cw in teacher_cw:
+                    col1, col2 = st.columns([4, 1])
+                    with col1:
+                        st.write(f"📄 {cw['file_name']} (上传于 {cw['upload_time']})")
+                    with col2:
+                        if st.button("❌ 删除", key=f"del_{cw['id']}"):
+                            ok, msg = delete_courseware(cw['id'], st.session_state.user_id)
+                            if ok:
+                                st.success(msg)
+                                st.rerun()
+                            else:
+                                st.error(msg)
+            else:
+                st.info("您还没有上传任何课件。")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        else:  # 学情看板
+            st.markdown('<div class="custom-card">', unsafe_allow_html=True)
+            st.subheader("📊 碎碎念 · 学情看板")
+            st.caption("📌 数据实时更新，展示智能体的使用情况")
+
+            today_chat, total_ppt, total_users, trend_data = get_dashboard_stats()
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(label="👥 注册总人数", value=total_users)
+            with col2:
+                st.metric(label="📚 累计课件数", value=total_ppt)
+            with col3:
+                st.metric(label="💬 今日提问数", value=today_chat)
+
+            st.divider()
+            st.subheader("📈 近7天提问趋势")
+            if trend_data and len(trend_data) > 0:
+                df = pd.DataFrame(trend_data)
+                df['date'] = pd.to_datetime(df['date']).dt.date
+                all_dates = pd.date_range(end=pd.Timestamp.today(), periods=7).date
+                df_full = pd.DataFrame({'date': all_dates})
+                df = df_full.merge(df, on='date', how='left').fillna(0)
+                df['count'] = df['count'].astype(int)
+                st.bar_chart(df.set_index('date'), height=250)
+            else:
+                st.info("暂无提问数据，快去提问吧！")
+
+            st.divider()
+            st.caption("💡 小提示：数据每5分钟自动更新，真实反映教学互动情况。")
+            st.markdown('</div>', unsafe_allow_html=True)
