@@ -274,7 +274,7 @@ def get_dashboard_stats():
     finally:
         conn.close()
 
-# ---------- 获取学生热门提问词（智能合并相似词） ----------
+# ---------- 获取学生热门提问词（智能合并相似词，拆分长词） ----------
 def get_student_hot_keywords(top_n=10):
     conn = get_db_connection()
     try:
@@ -289,36 +289,31 @@ def get_student_hot_keywords(top_n=10):
             if not rows:
                 return []
 
-            # 第一步：合并所有提问文本
+            # 合并所有提问
             full_text = " ".join([row['content'] for row in rows if row['content']])
 
-            # 第二步：去除常见的“解释一下”、“请问”、“如何”等前缀/后缀干扰
-            clean_text = re.sub(r'(解释一下|解释|请问|什么是|什么叫|如何|怎么|怎样|能不能|说一下|讲讲|告诉|告诉我|给我|帮忙|帮我|我想问|我问|问一下|请教)', '', full_text)
-            # 去除多余空格
-            clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+            # 去除常见前缀/后缀
+            clean_text = re.sub(r'(解释一下|解释|请问|什么是|什么叫|如何|怎么|怎样|能不能|说一下|讲讲|告诉|告诉我|给我|帮忙|帮我|我想问|我问|问一下|请教|请|求|关于|有关|对于|关于)', '', full_text)
 
-            # 第三步：提取中英文核心词（长度>=2）
-            words = re.findall(r'[\u4e00-\u9fa5a-zA-Z]{2,}', clean_text)
+            # 将停用词替换为空格（拆分长词）
+            stopwords_replace = ['的', '了', '是', '我', '你', '他', '她', '它', '们', '就', '在', '有', '和', '与', '或',
+                                  '但', '而', '所', '也', '还', '等', '里', '中', '上', '下', '不', '这', '那', '一', '个',
+                                  '去', '来', '到', '对', '从', '会', '可', '能', '以', '之', '被', '把', '给', '让', '用',
+                                  '因', '为', '如', '果', '时', '后', '前', '左', '右', '大', '小', '多', '少', '更', '最',
+                                  '很', '太', '真', '好', '坏', '新', '旧', '开', '关', '正', '反', '方', '法', '做', '出',
+                                  '入', '处', '理', '程', '序', '员', '人', '物', '件', '事', '些', '种', '样', '点', '道',
+                                  '么', '下子', '一下', '那个', '这个', '那个', '哪个', '哪些', '什么', '怎么', '如何',
+                                  '为什么', '哪个', '哪些', '怎样', '能否', '是不是', '有没有', '可不可以', '可不', '可以']
+            for sw in stopwords_replace:
+                clean_text = clean_text.replace(sw, ' ')
 
-            # 第四步：停用词表（扩充了常见无意义词）
-            stopwords = {
-                '的', '了', '是', '我', '你', '他', '她', '它', '们', '就', '在', '有', '和', '与', '或',
-                '但', '而', '所', '也', '还', '等', '里', '中', '上', '下', '不', '这', '那', '一', '个',
-                '去', '来', '到', '对', '从', '会', '可', '能', '以', '之', '被', '把', '给', '让', '用',
-                '因', '为', '如', '果', '时', '后', '前', '左', '右', '大', '小', '多', '少', '更', '最',
-                '很', '太', '真', '好', '坏', '新', '旧', '开', '关', '正', '反', '方', '法', '做', '出',
-                '入', '处', '理', '程', '序', '员', '人', '物', '件', '事', '些', '种', '样', '点', '道',
-                '么', '么的', '下子', '一下', '那个', '这个', '那个', '哪个', '哪些', '什么', '怎么', '如何',
-                '为什么', '哪个', '哪些', '怎样', '能否', '是不是', '有没有', '可不可以', '可不', '可以',
-                # 增加英文停用词
-                'the', 'a', 'an', 'to', 'for', 'of', 'with', 'on', 'at', 'from', 'by', 'in', 'as'
-            }
+            # 按空格拆分，得到单词列表
+            words = clean_text.split()
+            # 过滤掉单字符和残留停用词
+            stopwords_set = set(stopwords_replace)
+            filtered = [w.lower() for w in words if len(w) > 1 and w.lower() not in stopwords_set]
 
-            # 第五步：过滤停用词
-            filtered = [w.lower() for w in words if w.lower() not in stopwords and len(w) > 1]
-
-            # 第六步：同义词合并（将同义的不同表达映射到标准词）
-            # 可继续扩充此映射表
+            # 同义词合并映射
             synonym_map = {
                 '深拷贝': ['deepcopy', 'deep copy', '深度拷贝', '深复制'],
                 '浅拷贝': ['shallowcopy', 'shallow copy', '浅度拷贝', '浅复制'],
@@ -360,31 +355,23 @@ def get_student_hot_keywords(top_n=10):
                 '特征工程': ['特征选择', '特征抽取', '特征提取'],
                 '模型评估': ['模型评价', '模型验证', '模型测试'],
             }
-
-            # 构建反向映射（同义词 -> 标准词）
             reverse_map = {}
             for standard, synonyms in synonym_map.items():
                 reverse_map[standard] = standard
                 for syn in synonyms:
                     reverse_map[syn] = standard
 
-            # 应用同义词映射
             mapped_words = []
             for w in filtered:
-                # 标准化：去空格、转小写
-                w_clean = w.lower().strip()
-                if w_clean in reverse_map:
-                    mapped_words.append(reverse_map[w_clean])
+                if w in reverse_map:
+                    mapped_words.append(reverse_map[w])
                 else:
-                    mapped_words.append(w_clean)
+                    mapped_words.append(w)
 
-            # 第七步：统计词频
             counter = Counter(mapped_words)
-
-            # 第八步：返回前 top_n 个，过滤掉出现次数为1的词（可选）
             result = [(word, count) for word, count in counter.most_common(top_n) if count > 1]
 
-            # 如果结果不足，补上一些高频但可能单独出现的词
+            # 如果结果不足，补上其他高频词
             if len(result) < top_n:
                 all_words = [w for w in filtered if len(w) > 1]
                 all_counter = Counter(all_words)
@@ -393,9 +380,7 @@ def get_student_hot_keywords(top_n=10):
                         result.append((word, count))
                         if len(result) >= top_n:
                             break
-
             return result[:top_n]
-
     except Exception as e:
         st.error(f"获取学生热门词失败：{e}")
         return []
@@ -539,7 +524,6 @@ else:
         st.markdown('</div>', unsafe_allow_html=True)
 
     else:  # teacher
-        # 教师端子菜单切换
         teacher_mode = st.radio(
             "选择功能",
             ["📝 教研辅助", "📊 学情看板"],
@@ -644,7 +628,6 @@ else:
             else:
                 st.info("暂无提问数据，快去提问吧！")
 
-            # ---------- 显示学生热门提问词（已合并相似词） ----------
             st.divider()
             st.subheader("🔥 学生热门提问词")
             hot_words = get_student_hot_keywords(10)
@@ -658,7 +641,6 @@ else:
                         )
             else:
                 st.info("暂无学生提问数据，无法生成热门词。")
-            # ---------------------------------------------
 
             st.divider()
             st.caption("💡 小提示：数据每5分钟自动更新，真实反映教学互动情况。")
